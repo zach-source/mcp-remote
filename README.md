@@ -32,6 +32,70 @@ All the most popular MCP clients (Claude Desktop, Cursor & Windsurf) use the fol
 }
 ```
 
+### Multi-Server Support
+
+You can connect to multiple MCP servers simultaneously using `mcp-remote-multi`:
+
+```json
+{
+  "mcpServers": {
+    "multiple-servers": {
+      "command": "npx",
+      "args": [
+        "mcp-remote-multi",
+        "https://server1.example/sse",
+        "https://server2.example/sse",
+        "https://server3.example/sse"
+      ]
+    }
+  }
+}
+```
+
+#### How Multi-Server Works
+
+- **Sequential Authentication**: Each server is authenticated individually in order
+- **Tool Name Prefixing**: Tools from different servers are prefixed with the server hostname to avoid conflicts
+  - Example: `server1_example:tool-name` for a tool from `server1.example`
+- **Automatic Request Routing**: The proxy automatically routes tool calls to the correct server based on the prefix
+- **Aggregated Capabilities**: All tools, resources, and prompts from all servers are merged and presented to the client
+
+#### Multi-Server Configuration Options
+
+You can specify per-server options by using `--server` flags:
+
+```json
+{
+  "mcpServers": {
+    "multiple-servers": {
+      "command": "npx",
+      "args": [
+        "mcp-remote-multi",
+        "--server", "https://server1.example/sse",
+        "--header", "Authorization:Bearer token1",
+        "--port", "3334",
+        "--server", "https://server2.example/sse", 
+        "--header", "X-API-Key:key2",
+        "--transport", "sse-only",
+        "--allow-http"
+      ]
+    }
+  }
+}
+```
+
+Options apply to the most recently specified server:
+- `--port <port>`: OAuth callback port for the server
+- `--header <key:value>`: Custom header for the server
+- `--transport <strategy>`: Transport strategy for the server
+- `--host <hostname>`: OAuth callback hostname for the server
+- `--resource <resource>`: Resource to authorize for the server
+- `--force-auth`: Force fresh authentication even if valid tokens exist
+
+Global options:
+- `--allow-http`: Allow HTTP connections for all servers
+- `--debug`: Enable debug logging for all servers
+
 ### Custom Headers
 
 To bypass authentication, or to emit custom headers on all requests to your remote server, pass `--header` CLI arguments:

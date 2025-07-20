@@ -1,0 +1,39 @@
+{
+  "mcpServers": {
+    "cloudflare-multi": {
+      "command": "npx",
+      "args": [
+        "mcp-remote-multi",
+        "https://bindings.mcp.cloudflare.com/sse",
+        "https://builds.mcp.cloudflare.com/sse",
+        "https://docs.mcp.cloudflare.com/sse"
+      ]
+    },
+    "multi-with-options": {
+      "command": "npx",
+      "args": [
+        "mcp-remote-multi",
+        "--server",
+        "https://api1.example.com/sse",
+        "--header",
+        "Authorization:Bearer ${API1_TOKEN}",
+        "--port",
+        "3334",
+        "--server",
+        "https://api2.example.com/sse",
+        "--header",
+        "X-API-Key:${API2_KEY}",
+        "--transport",
+        "sse-only",
+        "--server",
+        "https://api3.example.com/sse",
+        "--allow-http",
+        "--debug"
+      ],
+      "env": {
+        "API1_TOKEN": "your-token-here",
+        "API2_KEY": "your-key-here"
+      }
+    }
+  }
+}

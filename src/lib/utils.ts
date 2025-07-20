@@ -722,3 +722,283 @@ export function setupSignalHandlers(cleanup: () => Promise<void>) {
 export function getServerUrlHash(serverUrl: string): string {
   return crypto.createHash('md5').update(serverUrl).digest('hex')
 }
+
+/**
+ * Parses command line arguments for multi-server MCP proxy
+ * @param args Command line arguments
+ * @returns A promise that resolves to an array of server configurations
+ */
+export async function parseMultiServerCommandLineArgs(args: string[]): Promise<
+  Array<{
+    url: string
+    callbackPort: number
+    headers: Record<string, string>
+    transportStrategy: TransportStrategy
+    host: string
+    staticOAuthClientMetadata: StaticOAuthClientMetadata
+    staticOAuthClientInfo: StaticOAuthClientInformationFull
+    authorizeResource: string
+    forceAuth?: boolean
+  }>
+> {
+  const usage =
+    'Usage: npx tsx multi-proxy.ts <https://server1-url> <https://server2-url> ... [options]\n' +
+    'Options:\n' +
+    '  --server <url>              Add a server URL\n' +
+    '  --port <port>               Callback port for the previous server\n' +
+    '  --header <key:value>        Header for the previous server\n' +
+    '  --transport <strategy>      Transport strategy for the previous server\n' +
+    '  --host <hostname>           Callback hostname for the previous server\n' +
+    '  --resource <resource>       Resource to authorize for the previous server\n' +
+    '  --force-auth                Force fresh authentication for the previous server\n' +
+    '  --allow-http                Allow HTTP connections (applies to all servers)\n' +
+    '  --debug                     Enable debug logging'
+
+  const configs: Array<{
+    url: string
+    callbackPort: number
+    headers: Record<string, string>
+    transportStrategy: TransportStrategy
+    host: string
+    staticOAuthClientMetadata: StaticOAuthClientMetadata
+    staticOAuthClientInfo: StaticOAuthClientInformationFull
+    authorizeResource: string
+    forceAuth?: boolean
+  }> = []
+
+  let currentConfig: {
+    url?: string
+    callbackPort?: number
+    headers: Record<string, string>
+    transportStrategy: TransportStrategy
+    host: string
+    staticOAuthClientMetadata: StaticOAuthClientMetadata
+    staticOAuthClientInfo: StaticOAuthClientInformationFull
+    authorizeResource: string
+    forceAuth?: boolean
+  } = {
+    headers: {},
+    transportStrategy: 'http-first',
+    host: 'localhost',
+    staticOAuthClientMetadata: null,
+    staticOAuthClientInfo: null,
+    authorizeResource: '',
+  }
+
+  const allowHttp = args.includes('--allow-http')
+  const debug = args.includes('--debug')
+
+  if (debug) {
+    DEBUG = true
+    log('Debug mode enabled - detailed logs will be written to ~/.mcp-auth/')
+  }
+
+  let i = 0
+  while (i < args.length) {
+    const arg = args[i]
+
+    if (arg === '--debug' || arg === '--allow-http') {
+      // Skip these as they're already processed
+      i++
+      continue
+    }
+
+    if (arg === '--server' || arg.startsWith('http://') || arg.startsWith('https://')) {
+      // Save previous config if exists
+      if (currentConfig.url) {
+        const url = new URL(currentConfig.url)
+        const isLocalhost = (url.hostname === 'localhost' || url.hostname === '127.0.0.1') && url.protocol === 'http:'
+
+        if (!(url.protocol == 'https:' || isLocalhost || allowHttp)) {
+          log(`Error: Non-HTTPS URL ${currentConfig.url} is only allowed for localhost or when --allow-http flag is provided`)
+          log(usage)
+          process.exit(1)
+        }
+
+        const serverUrlHash = getServerUrlHash(currentConfig.url)
+        const defaultPort = calculateDefaultPort(serverUrlHash)
+
+        // Set server hash globally for debug logging temporarily
+        global.currentServerUrlHash = serverUrlHash
+
+        const [existingClientPort, availablePort] = await Promise.all([
+          findExistingClientPort(serverUrlHash),
+          findAvailablePort(defaultPort),
+        ])
+
+        let callbackPort: number
+        if (currentConfig.callbackPort) {
+          if (existingClientPort && currentConfig.callbackPort !== existingClientPort) {
+            log(
+              `Warning! Specified callback port of ${currentConfig.callbackPort} for ${currentConfig.url}, which conflicts with existing client registration port ${existingClientPort}. Deleting existing client data to force reregistration.`,
+            )
+            await rm(getConfigFilePath(serverUrlHash, 'client_info.json'))
+          }
+          callbackPort = currentConfig.callbackPort
+        } else if (existingClientPort) {
+          log(`Using existing client port for ${currentConfig.url}: ${existingClientPort}`)
+          callbackPort = existingClientPort
+        } else {
+          log(`Using automatically selected callback port for ${currentConfig.url}: ${availablePort}`)
+          callbackPort = availablePort
+        }
+
+        // Replace environment variables in headers
+        const processedHeaders = { ...currentConfig.headers }
+        for (const [key, value] of Object.entries(processedHeaders)) {
+          processedHeaders[key] = value.replace(/\$\{([^}]+)}/g, (match, envVarName) => {
+            const envVarValue = process.env[envVarName]
+            if (envVarValue !== undefined) {
+              log(`Replacing ${match} with environment value in header '${key}' for ${currentConfig.url}`)
+              return envVarValue
+            } else {
+              log(`Warning: Environment variable '${envVarName}' not found for header '${key}' for ${currentConfig.url}`)
+              return ''
+            }
+          })
+        }
+
+        configs.push({
+          url: currentConfig.url,
+          callbackPort,
+          headers: processedHeaders,
+          transportStrategy: currentConfig.transportStrategy,
+          host: currentConfig.host,
+          staticOAuthClientMetadata: currentConfig.staticOAuthClientMetadata,
+          staticOAuthClientInfo: currentConfig.staticOAuthClientInfo,
+          authorizeResource: currentConfig.authorizeResource,
+          forceAuth: currentConfig.forceAuth,
+        })
+      }
+
+      // Start new config
+      const serverUrl = arg === '--server' && i + 1 < args.length ? args[++i] : arg
+      currentConfig = {
+        url: serverUrl,
+        headers: {},
+        transportStrategy: 'http-first',
+        host: 'localhost',
+        staticOAuthClientMetadata: null,
+        staticOAuthClientInfo: null,
+        authorizeResource: '',
+      }
+    } else if (arg === '--port' && i + 1 < args.length) {
+      currentConfig.callbackPort = parseInt(args[++i])
+    } else if (arg === '--header' && i + 1 < args.length) {
+      const value = args[++i]
+      const match = value.match(/^([A-Za-z0-9_-]+):(.*)$/)
+      if (match) {
+        currentConfig.headers[match[1]] = match[2]
+      } else {
+        log(`Warning: ignoring invalid header argument: ${value}`)
+      }
+    } else if (arg === '--transport' && i + 1 < args.length) {
+      const strategy = args[++i]
+      if (strategy === 'sse-only' || strategy === 'http-only' || strategy === 'sse-first' || strategy === 'http-first') {
+        currentConfig.transportStrategy = strategy as TransportStrategy
+      } else {
+        log(`Warning: Ignoring invalid transport strategy: ${strategy}`)
+      }
+    } else if (arg === '--host' && i + 1 < args.length) {
+      currentConfig.host = args[++i]
+    } else if (arg === '--resource' && i + 1 < args.length) {
+      currentConfig.authorizeResource = args[++i]
+    } else if (arg === '--static-oauth-client-metadata' && i + 1 < args.length) {
+      const metadataArg = args[++i]
+      if (metadataArg.startsWith('@')) {
+        const filePath = metadataArg.slice(1)
+        currentConfig.staticOAuthClientMetadata = JSON.parse(await readFile(filePath, 'utf8'))
+      } else {
+        currentConfig.staticOAuthClientMetadata = JSON.parse(metadataArg)
+      }
+    } else if (arg === '--static-oauth-client-info' && i + 1 < args.length) {
+      const infoArg = args[++i]
+      if (infoArg.startsWith('@')) {
+        const filePath = infoArg.slice(1)
+        currentConfig.staticOAuthClientInfo = JSON.parse(await readFile(filePath, 'utf8'))
+      } else {
+        currentConfig.staticOAuthClientInfo = JSON.parse(infoArg)
+      }
+    } else if (arg === '--force-auth') {
+      currentConfig.forceAuth = true
+    } else {
+      log(`Unknown argument: ${arg}`)
+      log(usage)
+      process.exit(1)
+    }
+
+    i++
+  }
+
+  // Don't forget the last config
+  if (currentConfig.url) {
+    const url = new URL(currentConfig.url)
+    const isLocalhost = (url.hostname === 'localhost' || url.hostname === '127.0.0.1') && url.protocol === 'http:'
+
+    if (!(url.protocol == 'https:' || isLocalhost || allowHttp)) {
+      log(`Error: Non-HTTPS URL ${currentConfig.url} is only allowed for localhost or when --allow-http flag is provided`)
+      log(usage)
+      process.exit(1)
+    }
+
+    const serverUrlHash = getServerUrlHash(currentConfig.url)
+    const defaultPort = calculateDefaultPort(serverUrlHash)
+
+    // Set server hash globally for debug logging temporarily
+    global.currentServerUrlHash = serverUrlHash
+
+    const [existingClientPort, availablePort] = await Promise.all([findExistingClientPort(serverUrlHash), findAvailablePort(defaultPort)])
+
+    let callbackPort: number
+    if (currentConfig.callbackPort) {
+      if (existingClientPort && currentConfig.callbackPort !== existingClientPort) {
+        log(
+          `Warning! Specified callback port of ${currentConfig.callbackPort} for ${currentConfig.url}, which conflicts with existing client registration port ${existingClientPort}. Deleting existing client data to force reregistration.`,
+        )
+        await rm(getConfigFilePath(serverUrlHash, 'client_info.json'))
+      }
+      callbackPort = currentConfig.callbackPort
+    } else if (existingClientPort) {
+      log(`Using existing client port for ${currentConfig.url}: ${existingClientPort}`)
+      callbackPort = existingClientPort
+    } else {
+      log(`Using automatically selected callback port for ${currentConfig.url}: ${availablePort}`)
+      callbackPort = availablePort
+    }
+
+    // Replace environment variables in headers
+    const processedHeaders = { ...currentConfig.headers }
+    for (const [key, value] of Object.entries(processedHeaders)) {
+      processedHeaders[key] = value.replace(/\$\{([^}]+)}/g, (match, envVarName) => {
+        const envVarValue = process.env[envVarName]
+        if (envVarValue !== undefined) {
+          log(`Replacing ${match} with environment value in header '${key}' for ${currentConfig.url}`)
+          return envVarValue
+        } else {
+          log(`Warning: Environment variable '${envVarName}' not found for header '${key}' for ${currentConfig.url}`)
+          return ''
+        }
+      })
+    }
+
+    configs.push({
+      url: currentConfig.url,
+      callbackPort,
+      headers: processedHeaders,
+      transportStrategy: currentConfig.transportStrategy,
+      host: currentConfig.host,
+      staticOAuthClientMetadata: currentConfig.staticOAuthClientMetadata,
+      staticOAuthClientInfo: currentConfig.staticOAuthClientInfo,
+      authorizeResource: currentConfig.authorizeResource,
+      forceAuth: currentConfig.forceAuth,
+    })
+  }
+
+  if (configs.length === 0) {
+    log('Error: No server URLs provided')
+    log(usage)
+    process.exit(1)
+  }
+
+  return configs
+}

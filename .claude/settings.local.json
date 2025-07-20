@@ -1,0 +1,6 @@
+{
+  "permissions": {
+    "allow": ["Bash(pnpm lint-fix:*)", "Bash(pnpm build:*)", "Bash(pnpm check:*)", "Bash(./test-multi-auth.sh:*)"],
+    "deny": []
+  }
+}
