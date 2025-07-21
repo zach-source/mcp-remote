@@ -67,7 +67,7 @@ class MultiServerProxy {
     this.localTransport = new StdioServerTransport()
   }
 
-  async addServer(config: ServerConfig): Promise<void> {
+  async addServer(config: ServerConfig, maxRetries: number = 3): Promise<void> {
     const serverUrlHash = getServerUrlHash(config.url)
 
     // Set global hash for debug logging
@@ -174,52 +174,138 @@ class MultiServerProxy {
       }
     }
 
-    try {
-      // Connect to remote server with lazy authentication
-      const remoteTransport = await connectToRemoteServer(
-        null,
-        config.url,
-        authProvider,
-        config.headers,
-        authInitializer,
-        config.transportStrategy,
-      )
+    // Retry loop for authentication
+    let lastError: any
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // Connect to remote server with lazy authentication
+        const remoteTransport = await connectToRemoteServer(
+          null,
+          config.url,
+          authProvider,
+          config.headers,
+          authInitializer,
+          config.transportStrategy,
+        )
 
-      // Store the connected server
-      this.servers.set(config.url, {
-        config,
-        transport: remoteTransport,
-        serverInfo: null,
-        tools: new Map(),
-        resources: new Map(),
-        prompts: new Map(),
-      })
+        // Store the connected server
+        this.servers.set(config.url, {
+          config,
+          transport: remoteTransport,
+          serverInfo: null,
+          tools: new Map(),
+          resources: new Map(),
+          prompts: new Map(),
+        })
 
-      // Add cleanup function
-      this.cleanupFunctions.push(async () => {
-        await remoteTransport.close()
+        // Add cleanup function
+        this.cleanupFunctions.push(async () => {
+          await remoteTransport.close()
+          if (server) {
+            server.close()
+          }
+        })
+
+        log(`Successfully connected to ${config.url}`)
+
+        // Wait for auth completion if there's a pending auth flow
+        const authPromise = this.authCompletionPromises.get(config.url)
+        if (authPromise) {
+          log(`Waiting for OAuth authentication to complete for ${config.url}...`)
+          await authPromise
+          log(`OAuth authentication completed for ${config.url}`)
+          this.authCompletionPromises.delete(config.url)
+        }
+
+        // Success - exit retry loop
+        return
+      } catch (error) {
+        lastError = error
+        log(`Failed to connect to ${config.url} (attempt ${attempt}/${maxRetries}):`, error)
+
         if (server) {
           server.close()
+          server = null
         }
-      })
 
-      log(`Successfully connected to ${config.url}`)
+        // Check if this is an auth-related error
+        const errorMessage = error?.message || String(error)
+        const isAuthError =
+          errorMessage.includes('auth') ||
+          errorMessage.includes('OAuth') ||
+          errorMessage.includes('token') ||
+          errorMessage.includes('401') ||
+          errorMessage.includes('403')
 
-      // Wait for auth completion if there's a pending auth flow
-      const authPromise = this.authCompletionPromises.get(config.url)
-      if (authPromise) {
-        log(`Waiting for OAuth authentication to complete for ${config.url}...`)
-        await authPromise
-        log(`OAuth authentication completed for ${config.url}`)
-        this.authCompletionPromises.delete(config.url)
+        if (attempt < maxRetries && isAuthError) {
+          log(`Retrying authentication for ${config.url} in 5 seconds...`)
+
+          // Clear any stale auth data before retry
+          if (!shouldSkipAuth) {
+            try {
+              const tokensPath = getConfigFilePath(serverUrlHash, 'tokens.json')
+              const clientInfoPath = getConfigFilePath(serverUrlHash, 'client_info.json')
+              await rm(tokensPath).catch(() => {})
+              await rm(clientInfoPath).catch(() => {})
+              log(`Cleared auth data for retry`)
+            } catch (e) {
+              // Ignore cleanup errors
+            }
+          }
+
+          // Wait before retry
+          await new Promise((resolve) => setTimeout(resolve, 5000))
+
+          // Reset auth completion promise for retry
+          this.authCompletionPromises.delete(config.url)
+
+          // Recreate auth coordinator for retry
+          events = new EventEmitter()
+          authCoordinator = createLazyAuthCoordinator(serverUrlHash, config.callbackPort, events)
+
+          // Set up new auth completion tracking
+          if (!shouldSkipAuth) {
+            const authCompletionPromise = new Promise<void>((resolve) => {
+              let resolved = false
+
+              events.once('auth-code-received', () => {
+                if (!resolved) {
+                  resolved = true
+                  log(`OAuth callback received for ${config.url} (retry ${attempt})`)
+                  setTimeout(() => resolve(), 2000)
+                }
+              })
+
+              events.once('auth-success', () => {
+                if (!resolved) {
+                  resolved = true
+                  resolve()
+                }
+              })
+            })
+
+            this.authCompletionPromises.set(config.url, authCompletionPromise)
+          }
+
+          // Redefine auth initializer for retry
+          authInitializer = async () => {
+            const authState = await authCoordinator.initializeAuth()
+            server = authState.server
+            return {
+              waitForAuthCode: authState.waitForAuthCode,
+              skipBrowserAuth: authState.skipBrowserAuth,
+            }
+          }
+        } else {
+          // Not an auth error or max retries reached
+          break
+        }
       }
-    } catch (error) {
-      log(`Failed to connect to ${config.url}:`, error)
-      if (server) {
-        server.close()
-      }
-      throw error
     }
+
+    // All retries failed
+    log(`Failed to connect to ${config.url} after ${maxRetries} attempts`)
+    throw lastError
   }
 
   async start(): Promise<void> {
@@ -623,13 +709,13 @@ class MultiServerProxy {
 /**
  * Main function to run the multi-server proxy
  */
-async function runMultiProxy(configs: ServerConfig[]): Promise<void> {
+async function runMultiProxy(configs: ServerConfig[], maxRetries?: number): Promise<void> {
   const proxy = new MultiServerProxy()
 
   // Connect to all servers sequentially
   for (const config of configs) {
     try {
-      await proxy.addServer(config)
+      await proxy.addServer(config, maxRetries)
     } catch (error) {
       log(`Failed to add server ${config.url}:`, error)
       // Continue with other servers
@@ -651,7 +737,7 @@ async function runMultiProxy(configs: ServerConfig[]): Promise<void> {
 
 // Parse command-line arguments and run the proxy
 parseMultiServerCommandLineArgs(process.argv.slice(2))
-  .then((configs) => runMultiProxy(configs))
+  .then((result) => runMultiProxy(result.servers, result.maxRetries))
   .catch((error) => {
     log('Fatal error:', error)
     process.exit(1)

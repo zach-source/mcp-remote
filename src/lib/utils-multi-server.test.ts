@@ -74,30 +74,31 @@ describe('parseMultiServerCommandLineArgs', () => {
       const args = ['https://server1.example.com/sse']
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(1)
-      expect(result[0].url).toBe('https://server1.example.com/sse')
-      expect(result[0].transportStrategy).toBe('http-first')
-      expect(result[0].host).toBe('localhost')
-      expect(result[0].headers).toEqual({})
+      expect(result.servers).toHaveLength(1)
+      expect(result.servers[0].url).toBe('https://server1.example.com/sse')
+      expect(result.servers[0].transportStrategy).toBe('http-first')
+      expect(result.servers[0].host).toBe('localhost')
+      expect(result.servers[0].headers).toEqual({})
+      expect(result.maxRetries).toBeUndefined()
     })
 
     it('should parse multiple server URLs', async () => {
       const args = ['https://server1.example.com/sse', 'https://server2.example.com/sse', 'https://server3.example.com/sse']
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(3)
-      expect(result[0].url).toBe('https://server1.example.com/sse')
-      expect(result[1].url).toBe('https://server2.example.com/sse')
-      expect(result[2].url).toBe('https://server3.example.com/sse')
+      expect(result.servers).toHaveLength(3)
+      expect(result.servers[0].url).toBe('https://server1.example.com/sse')
+      expect(result.servers[1].url).toBe('https://server2.example.com/sse')
+      expect(result.servers[2].url).toBe('https://server3.example.com/sse')
     })
 
     it('should parse servers with --server flag', async () => {
       const args = ['--server', 'https://server1.example.com/sse', '--server', 'https://server2.example.com/sse']
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(2)
-      expect(result[0].url).toBe('https://server1.example.com/sse')
-      expect(result[1].url).toBe('https://server2.example.com/sse')
+      expect(result.servers).toHaveLength(2)
+      expect(result.servers[0].url).toBe('https://server1.example.com/sse')
+      expect(result.servers[1].url).toBe('https://server2.example.com/sse')
     })
   })
 
@@ -115,18 +116,18 @@ describe('parseMultiServerCommandLineArgs', () => {
       ]
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(2)
-      expect(result[0].callbackPort).toBe(3334)
-      expect(result[1].callbackPort).toBe(3335)
+      expect(result.servers).toHaveLength(2)
+      expect(result.servers[0].callbackPort).toBe(3334)
+      expect(result.servers[1].callbackPort).toBe(3335)
     })
 
     it('should use automatic port assignment when not specified', async () => {
       const args = ['https://server1.example.com/sse', '--server', 'https://server2.example.com/sse', '--port', '3334']
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(2)
-      expect(result[0].callbackPort).toBeGreaterThan(0) // Auto-assigned
-      expect(result[1].callbackPort).toBe(3334)
+      expect(result.servers).toHaveLength(2)
+      expect(result.servers[0].callbackPort).toBeGreaterThan(0) // Auto-assigned
+      expect(result.servers[1].callbackPort).toBe(3334)
     })
   })
 
@@ -146,12 +147,12 @@ describe('parseMultiServerCommandLineArgs', () => {
       ]
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(2)
-      expect(result[0].headers).toEqual({
+      expect(result.servers).toHaveLength(2)
+      expect(result.servers[0].headers).toEqual({
         Authorization: 'Bearer token1',
         'X-Custom': 'value1',
       })
-      expect(result[1].headers).toEqual({
+      expect(result.servers[1].headers).toEqual({
         'X-API-Key': 'key2',
       })
     })
@@ -172,10 +173,10 @@ describe('parseMultiServerCommandLineArgs', () => {
       ]
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result[0].headers).toEqual({
+      expect(result.servers[0].headers).toEqual({
         Authorization: 'Bearer secret-token',
       })
-      expect(result[1].headers).toEqual({
+      expect(result.servers[1].headers).toEqual({
         'X-API-Key': 'api-key-123',
       })
 
@@ -187,7 +188,7 @@ describe('parseMultiServerCommandLineArgs', () => {
       const args = ['https://server1.example.com/sse', '--header', 'Authorization:Bearer ${MISSING_VAR}']
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result[0].headers).toEqual({
+      expect(result.servers[0].headers).toEqual({
         Authorization: 'Bearer ',
       })
     })
@@ -209,17 +210,17 @@ describe('parseMultiServerCommandLineArgs', () => {
       ]
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(3)
-      expect(result[0].transportStrategy).toBe('sse-only')
-      expect(result[1].transportStrategy).toBe('http-only')
-      expect(result[2].transportStrategy).toBe('http-first') // Default
+      expect(result.servers).toHaveLength(3)
+      expect(result.servers[0].transportStrategy).toBe('sse-only')
+      expect(result.servers[1].transportStrategy).toBe('http-only')
+      expect(result.servers[2].transportStrategy).toBe('http-first') // Default
     })
 
     it('should handle invalid transport strategies', async () => {
       const args = ['https://server1.example.com/sse', '--transport', 'invalid-strategy']
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result[0].transportStrategy).toBe('http-first') // Default
+      expect(result.servers[0].transportStrategy).toBe('http-first') // Default
     })
   })
 
@@ -237,10 +238,10 @@ describe('parseMultiServerCommandLineArgs', () => {
       ]
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(3)
-      expect(result[0].forceAuth).toBe(true)
-      expect(result[1].forceAuth).toBeUndefined()
-      expect(result[2].forceAuth).toBe(true)
+      expect(result.servers).toHaveLength(3)
+      expect(result.servers[0].forceAuth).toBe(true)
+      expect(result.servers[1].forceAuth).toBeUndefined()
+      expect(result.servers[2].forceAuth).toBe(true)
     })
   })
 
@@ -258,9 +259,9 @@ describe('parseMultiServerCommandLineArgs', () => {
       ]
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(2)
-      expect(result[0].host).toBe('0.0.0.0')
-      expect(result[1].host).toBe('127.0.0.1')
+      expect(result.servers).toHaveLength(2)
+      expect(result.servers[0].host).toBe('0.0.0.0')
+      expect(result.servers[1].host).toBe('127.0.0.1')
     })
   })
 
@@ -278,9 +279,9 @@ describe('parseMultiServerCommandLineArgs', () => {
       ]
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(2)
-      expect(result[0].authorizeResource).toBe('resource1')
-      expect(result[1].authorizeResource).toBe('resource2')
+      expect(result.servers).toHaveLength(2)
+      expect(result.servers[0].authorizeResource).toBe('resource1')
+      expect(result.servers[1].authorizeResource).toBe('resource2')
     })
   })
 
@@ -308,26 +309,26 @@ describe('parseMultiServerCommandLineArgs', () => {
       ]
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(3)
+      expect(result.servers).toHaveLength(3)
 
       // First server
-      expect(result[0].url).toBe('https://server1.example.com/sse')
-      expect(result[0].headers).toEqual({ 'X-First': 'value1' })
-      expect(result[0].transportStrategy).toBe('http-first')
-      expect(result[0].forceAuth).toBeUndefined()
+      expect(result.servers[0].url).toBe('https://server1.example.com/sse')
+      expect(result.servers[0].headers).toEqual({ 'X-First': 'value1' })
+      expect(result.servers[0].transportStrategy).toBe('http-first')
+      expect(result.servers[0].forceAuth).toBeUndefined()
 
       // Second server
-      expect(result[1].url).toBe('https://server2.example.com/sse')
-      expect(result[1].callbackPort).toBe(3334)
-      expect(result[1].headers).toEqual({ Authorization: 'Bearer token2' })
-      expect(result[1].transportStrategy).toBe('sse-only')
-      expect(result[1].forceAuth).toBe(true)
+      expect(result.servers[1].url).toBe('https://server2.example.com/sse')
+      expect(result.servers[1].callbackPort).toBe(3334)
+      expect(result.servers[1].headers).toEqual({ Authorization: 'Bearer token2' })
+      expect(result.servers[1].transportStrategy).toBe('sse-only')
+      expect(result.servers[1].forceAuth).toBe(true)
 
       // Third server
-      expect(result[2].url).toBe('https://server3.example.com/sse')
-      expect(result[2].host).toBe('0.0.0.0')
-      expect(result[2].authorizeResource).toBe('special-resource')
-      expect(result[2].forceAuth).toBeUndefined()
+      expect(result.servers[2].url).toBe('https://server3.example.com/sse')
+      expect(result.servers[2].host).toBe('0.0.0.0')
+      expect(result.servers[2].authorizeResource).toBe('special-resource')
+      expect(result.servers[2].forceAuth).toBeUndefined()
     })
 
     it('should reset configuration for each new server', async () => {
@@ -344,17 +345,17 @@ describe('parseMultiServerCommandLineArgs', () => {
       ]
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(2)
+      expect(result.servers).toHaveLength(2)
 
       // First server has custom values
-      expect(result[0].headers).toEqual({ 'X-Header': 'value1' })
-      expect(result[0].transportStrategy).toBe('sse-only')
-      expect(result[0].forceAuth).toBe(true)
+      expect(result.servers[0].headers).toEqual({ 'X-Header': 'value1' })
+      expect(result.servers[0].transportStrategy).toBe('sse-only')
+      expect(result.servers[0].forceAuth).toBe(true)
 
       // Second server has defaults
-      expect(result[1].headers).toEqual({})
-      expect(result[1].transportStrategy).toBe('http-first')
-      expect(result[1].forceAuth).toBeUndefined()
+      expect(result.servers[1].headers).toEqual({})
+      expect(result.servers[1].transportStrategy).toBe('http-first')
+      expect(result.servers[1].forceAuth).toBeUndefined()
     })
   })
 
@@ -363,24 +364,40 @@ describe('parseMultiServerCommandLineArgs', () => {
       const args = ['--debug', 'https://server1.example.com/sse']
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(1)
+      expect(result.servers).toHaveLength(1)
       // Debug flag doesn't affect server config directly
+    })
+
+    it('should handle --max-retries flag', async () => {
+      const args = ['--max-retries', '5', 'https://server1.example.com/sse']
+      const result = await parseMultiServerCommandLineArgs(args)
+
+      expect(result.servers).toHaveLength(1)
+      expect(result.maxRetries).toBe(5)
+    })
+
+    it('should handle invalid --max-retries value', async () => {
+      const args = ['--max-retries', 'invalid', 'https://server1.example.com/sse']
+      const result = await parseMultiServerCommandLineArgs(args)
+
+      expect(result.servers).toHaveLength(1)
+      expect(result.maxRetries).toBeUndefined()
     })
 
     it('should handle --allow-http flag', async () => {
       const args = ['--allow-http', 'http://insecure.example.com/sse']
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(1)
-      expect(result[0].url).toBe('http://insecure.example.com/sse')
+      expect(result.servers).toHaveLength(1)
+      expect(result.servers[0].url).toBe('http://insecure.example.com/sse')
     })
 
     it('should allow HTTP for localhost without flag', async () => {
       const args = ['http://localhost:3000/sse']
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result).toHaveLength(1)
-      expect(result[0].url).toBe('http://localhost:3000/sse')
+      expect(result.servers).toHaveLength(1)
+      expect(result.servers[0].url).toBe('http://localhost:3000/sse')
     })
 
     it('should reject non-HTTPS URLs without --allow-http', async () => {
@@ -428,7 +445,7 @@ describe('parseMultiServerCommandLineArgs', () => {
       const args = ['https://server1.example.com/sse', '--header', 'InvalidHeader']
       const result = await parseMultiServerCommandLineArgs(args)
 
-      expect(result[0].headers).toEqual({})
+      expect(result.servers[0].headers).toEqual({})
     })
   })
 })

@@ -59,6 +59,10 @@ You can connect to multiple MCP servers simultaneously using `mcp-remote-multi`:
   - Example: `server1_example:tool-name` for a tool from `server1.example`
 - **Automatic Request Routing**: The proxy automatically routes tool calls to the correct server based on the prefix
 - **Aggregated Capabilities**: All tools, resources, and prompts from all servers are merged and presented to the client
+- **Automatic Retry**: Failed authentications are automatically retried (up to 3 times by default)
+  - Clears stale authentication data before retrying
+  - Waits 5 seconds between retry attempts
+  - Can be configured with `--max-retries`
 
 #### Multi-Server Configuration Options
 
@@ -95,6 +99,7 @@ Options apply to the most recently specified server:
 Global options:
 - `--allow-http`: Allow HTTP connections for all servers
 - `--debug`: Enable debug logging for all servers
+- `--max-retries <n>`: Maximum authentication retry attempts (default: 3)
 
 ### Custom Headers
 

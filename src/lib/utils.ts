@@ -728,8 +728,8 @@ export function getServerUrlHash(serverUrl: string): string {
  * @param args Command line arguments
  * @returns A promise that resolves to an array of server configurations
  */
-export async function parseMultiServerCommandLineArgs(args: string[]): Promise<
-  Array<{
+export async function parseMultiServerCommandLineArgs(args: string[]): Promise<{
+  servers: Array<{
     url: string
     callbackPort: number
     headers: Record<string, string>
@@ -740,7 +740,8 @@ export async function parseMultiServerCommandLineArgs(args: string[]): Promise<
     authorizeResource: string
     forceAuth?: boolean
   }>
-> {
+  maxRetries?: number
+}> {
   const usage =
     'Usage: npx tsx multi-proxy.ts <https://server1-url> <https://server2-url> ... [options]\n' +
     'Options:\n' +
@@ -752,7 +753,8 @@ export async function parseMultiServerCommandLineArgs(args: string[]): Promise<
     '  --resource <resource>       Resource to authorize for the previous server\n' +
     '  --force-auth                Force fresh authentication for the previous server\n' +
     '  --allow-http                Allow HTTP connections (applies to all servers)\n' +
-    '  --debug                     Enable debug logging'
+    '  --debug                     Enable debug logging\n' +
+    '  --max-retries <n>           Maximum authentication retry attempts (default: 3)'
 
   const configs: Array<{
     url: string
@@ -787,6 +789,7 @@ export async function parseMultiServerCommandLineArgs(args: string[]): Promise<
 
   const allowHttp = args.includes('--allow-http')
   const debug = args.includes('--debug')
+  let maxRetries: number | undefined
 
   if (debug) {
     DEBUG = true
@@ -799,6 +802,16 @@ export async function parseMultiServerCommandLineArgs(args: string[]): Promise<
 
     if (arg === '--debug' || arg === '--allow-http') {
       // Skip these as they're already processed
+      i++
+      continue
+    }
+
+    if (arg === '--max-retries' && i + 1 < args.length) {
+      maxRetries = parseInt(args[++i])
+      if (isNaN(maxRetries) || maxRetries < 1) {
+        log('Warning: Invalid max-retries value, using default')
+        maxRetries = undefined
+      }
       i++
       continue
     }
@@ -1000,5 +1013,8 @@ export async function parseMultiServerCommandLineArgs(args: string[]): Promise<
     process.exit(1)
   }
 
-  return configs
+  return {
+    servers: configs,
+    maxRetries,
+  }
 }
