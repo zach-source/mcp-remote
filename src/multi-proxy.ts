@@ -113,10 +113,10 @@ class MultiServerProxy {
     }
 
     // Set up event emitter for auth flow
-    const events = new EventEmitter()
+    let events = new EventEmitter()
 
     // Create a lazy auth coordinator
-    const authCoordinator = createLazyAuthCoordinator(serverUrlHash, config.callbackPort, events)
+    let authCoordinator = createLazyAuthCoordinator(serverUrlHash, config.callbackPort, events)
 
     // Set up a promise that resolves when auth is actually completed
     // Only set up auth completion tracking if we're not skipping auth
@@ -162,7 +162,7 @@ class MultiServerProxy {
     let server: any = null
 
     // Define an auth initializer function
-    const authInitializer = async () => {
+    let authInitializer = async () => {
       const authState = await authCoordinator.initializeAuth()
 
       // Store server in outer scope for cleanup
@@ -229,7 +229,7 @@ class MultiServerProxy {
         }
 
         // Check if this is an auth-related error
-        const errorMessage = error?.message || String(error)
+        const errorMessage = (error as any)?.message || String(error)
         const isAuthError =
           errorMessage.includes('auth') ||
           errorMessage.includes('OAuth') ||
